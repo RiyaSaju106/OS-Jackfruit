@@ -1,0 +1,16 @@
+*.o
+*.ko
+*.mod
+*.mod.c
+*.order
+*.symvers
+Module.symvers
+modules.order
+engine
+cpu_hog
+io_pulse
+memory_hog
+logs/
+rootfs-base/
+rootfs-*/
+alpine-minirootfs-*.tar.gz
