@@ -1,0 +1,12 @@
+*.o
+*.ko
+*.mod
+*.mod.c
+*.order
+*.symvers
+Module.symvers
+modules.order
+logs/
+rootfs-base/
+rootfs-*/
+alpine-minirootfs-*.tar.gz
