@@ -1,6 +1,6 @@
 # Supervised Runtime Project
 
-## 1. Team Information
+## Team Information
 
 **Name:** Riya Saju
 **SRN:** PES1UG24CS378
@@ -10,144 +10,66 @@
 
 ---
 
-## 2. Project Overview
+## Getting Started
 
-This project implements a lightweight Linux container runtime in C, along with a kernel-space memory monitor.
+### What You Need
 
-The system supports:
+Before building, make sure your system has the following:
 
-* Running multiple containers concurrently
-* Filesystem isolation using `chroot`
-* Memory monitoring with soft and hard limits
-* Logging of container output
-* CLI-based container management
-* Scheduling experiments to observe Linux scheduler behavior
+- Ubuntu 22.04 or 24.04
+- `gcc` and `make` installed
+- Linux kernel headers for your running kernel
 
-The architecture is designed to support a supervisor-based model, where a long-running parent process manages container lifecycle and communication.
+### Building the Project
 
----
-
-## 3. Architecture
-
-The runtime consists of:
-
-### User-space Runtime (`engine.c`)
-
-* Handles container creation and lifecycle
-* Tracks container metadata (ID, PID, state)
-* Provides CLI commands (`start`, `ps`, `logs`, `stop`)
-* Simulates supervisor-style control via CLI invocation
-
-### Kernel Module (`monitor.c`)
-
-* Registers container PIDs via `ioctl`
-* Tracks memory usage (RSS)
-* Enforces:
-
-  * Soft limit → warning
-  * Hard limit → process termination
-
-### IPC Design
-
-* Logging: container output redirected to files
-* Control: CLI-driven interaction (can be extended to IPC-based supervisor using sockets/FIFO)
-
----
-
-## 4. Build, Load, and Run Instructions
-
-### Build
+From the project root, run:
 
 ```bash
 make
 ```
 
----
+### Loading the Kernel Module
 
-### Load Kernel Module
+Insert the module and verify the device node exists:
 
 ```bash
 sudo insmod monitor.ko
-```
-
----
-
-### Verify Device
-
-```bash
 ls -l /dev/container_monitor
 ```
 
----
-
-### Prepare Root Filesystems
+### Starting the Supervisor
 
 ```bash
-mkdir rootfs-base
-wget https://dl-cdn.alpinelinux.org/alpine/v3.20/releases/x86_64/alpine-minirootfs-3.20.3-x86_64.tar.gz
-tar -xzf alpine-minirootfs-3.20.3-x86_64.tar.gz -C rootfs-base
+sudo ./engine supervisor ./rootfs-base
+```
 
+### Setting Up Root Filesystems
+
+Create separate filesystem roots for each container:
+
+```bash
 cp -a ./rootfs-base ./rootfs-alpha
 cp -a ./rootfs-base ./rootfs-beta
 ```
 
----
+### Launching Containers
 
-### Start Containers
-
-```bash
-sudo ./engine start alpha ./rootfs-alpha /bin/sh
-sudo ./engine start beta ./rootfs-beta /bin/sh
-```
-
----
-
-### List Containers
+Spin up both containers with their respective roots and workloads:
 
 ```bash
-sudo ./engine ps
+sudo ./engine start alpha ./rootfs-alpha "/io_pulse"
+sudo ./engine start beta  ./rootfs-beta  "/io_pulse"
 ```
 
----
-
-### View Logs
+### Day-to-Day Commands
 
 ```bash
-sudo ./engine logs alpha
+sudo ./engine ps           # List running containers and their state
+sudo ./engine logs alpha   # Stream logs from a specific container
+sudo ./engine stop alpha   # Gracefully stop a container
 ```
 
----
-
-### Run Scheduling Experiment
-
-```bash
-./cpu_hog > /dev/null &
-nice -n 10 ./cpu_hog > /dev/null &
-ps -eo pid,comm,ni,%cpu --sort=-%cpu | grep cpu_hog
-```
-
----
-
-### Stop Containers (Manual Cleanup)
-
-```bash
-sudo killall sh
-sudo killall sleep
-sudo rm containers.txt
-```
-
----
-
-### Verify Teardown
-
-```bash
-sudo ./engine ps
-ps aux | grep sh
-```
-
----
-
-### Unload Kernel Module
+### Unloading the Module
 
 ```bash
 sudo rmmod monitor
@@ -155,147 +77,99 @@ sudo rmmod monitor
 
 ---
 
-## 5. Features Implemented
+## Feature Demonstrations
 
-### Multi-container Runtime
+**Concurrent Container Execution**
+Both containers run simultaneously under a single supervisor, each with its own isolated filesystem and process namespace — confirming that parallel execution is fully supported.
 
-Multiple containers (`alpha`, `beta`) run concurrently with separate root filesystems.
+**Live Container Metadata**
+`engine ps` surfaces per-container details: PID, current state, memory limits, exit codes, and recent log lines. This validates real-time status tracking.
 
----
+**Log Capture**
+Output from each container is captured over pipes and written into a bounded ring buffer. Logs remain accessible through the CLI or on-disk log files, with no data dropped.
 
-### Filesystem Isolation
+**CLI over UNIX Socket**
+The command-line tool communicates with the supervisor through a UNIX domain socket at `/tmp/engine_supervisor.sock`, exchanging commands and responses over that channel.
 
-Each container runs inside its own root filesystem using `chroot`.
+**Soft Memory Limit Behavior**
+Once a container's memory crosses the soft threshold, a warning is emitted to `dmesg` but the process is allowed to keep running — confirming that soft limits are advisory only.
 
----
+**Hard Memory Limit Enforcement**
+Exceeding the hard limit triggers a `SIGKILL`. The container's recorded state updates to reflect the termination, confirming that enforcement is working correctly.
 
-### Metadata Tracking
+**Scheduling Under Priority**
+Containers assigned different nice values exhibit measurably different CPU consumption under contention — higher-priority workloads receive a larger share of CPU time.
 
-Container metadata is tracked in user space:
-
-* Container ID
-* PID
-* State
-
----
-
-### Logging System
-
-Containers continuously generate logs stored in per-container files.
+**Clean Shutdown**
+All containers and supervisor processes exit cleanly, with no zombie processes or stale sockets left behind.
 
 ---
 
-### CLI Interface
+## Technical Overview
 
-Commands implemented:
+### Process Isolation
 
-* `start`
-* `ps`
-* `logs`
+Each container gets its own hostname and process namespace via Linux namespaces, combined with `chroot()` to restrict filesystem visibility.
 
----
+### Supervisor Responsibilities
 
-### Soft-limit Warning
+The supervisor owns the full container lifecycle — spawning, tracking metadata, and reaping finished processes through `waitpid()` to prevent resource leaks.
 
-Warning generated when memory usage crosses threshold.
+### IPC and Logging Stack
 
----
+| Channel | Purpose |
+|---|---|
+| UNIX sockets | CLI ↔ supervisor communication |
+| Pipes | Container stdout/stderr → log buffer |
+| Threads + mutex | Synchronized, race-free log writes |
 
-### Hard-limit Enforcement
+### Kernel Memory Monitor
 
-Container is terminated when hard limit is exceeded.
+The loadable kernel module continuously checks each container's memory footprint and enforces two-tier limits:
 
----
+- **Soft limit** — logs a warning, execution continues
+- **Hard limit** — sends `SIGKILL` and terminates the container
 
-### Scheduling Experiment
+### Scheduling Experiments
 
-Demonstrates CPU scheduling differences using `nice` values.
-
----
-
-### Clean Teardown
-
-All container processes are terminated and no residual processes remain.
+Different workload types and nice-value assignments are used to observe and document Linux scheduler behavior across CPU-bound and I/O-bound scenarios.
 
 ---
 
-## 6. Limitations and Design Notes
+## Design Decisions
 
-* The current implementation uses CLI-triggered control instead of a persistent supervisor daemon.
-* IPC between CLI and supervisor is simplified and can be extended using UNIX domain sockets or FIFOs.
-* Namespace isolation (PID, UTS) can be further enhanced using `clone()` system calls.
-* `/proc` mounting inside containers can be added for full process visibility.
-
----
-
-## 7. Engineering Analysis
-
-### Isolation Mechanisms
-
-Containers are isolated using `chroot`, which restricts filesystem access to a specific root directory. The host kernel is shared across all containers.
+| Component | Approach | Notable Tradeoff |
+|---|---|---|
+| Isolation | Namespaces + chroot | Lightweight, but still shares the host kernel |
+| Supervisor | Single central process | Simpler coordination; single point of failure |
+| IPC | Socket + pipe combination | Flexible but adds implementation complexity |
+| Memory Control | Kernel module | Powerful enforcement; harder to debug |
+| Scheduling | Synthetic test workloads | Results may need tuning for real workloads |
 
 ---
 
-### Supervisor and Process Lifecycle
+## Scheduler Observations
 
-The design supports a supervisor-based model where a parent process manages container lifecycle, tracks metadata, and handles signals.
+**CPU-bound vs CPU-bound**
+Nice values only meaningfully affect CPU share when available cores are saturated. On underloaded systems the difference is negligible.
 
----
+**CPU-bound vs I/O-bound**
+I/O-heavy tasks respond quickly to their data arriving, while CPU-heavy tasks steadily consume their allocated core time. The two coexist without starving each other.
 
-### IPC and Synchronization
-
-Logging is handled via file-based output. The system can be extended to include producer-consumer bounded buffer using threads and synchronization primitives.
-
----
-
-### Memory Management
-
-RSS (Resident Set Size) is used to measure memory usage. Soft limits provide warnings, while hard limits enforce termination.
+**Takeaway**
+The Linux scheduler distributes load across available cores and adjusts dynamically based on task priority and workload character.
 
 ---
 
-### Scheduling Behavior
+## Summary
 
-CPU-bound workloads (`cpu_hog`) demonstrate how Linux scheduling allocates CPU time based on process priority (`nice` values).
+This project delivers a working demonstration of core operating system concepts through a purpose-built container runtime:
 
----
+- Fully isolated multi-container execution
+- CLI tooling connected via IPC
+- Reliable, bounded logging infrastructure
+- Kernel-level memory monitoring with tiered enforcement
+- Reproducible scheduling experiments
+- Deterministic, leak-free cleanup
 
-## 8. Design Decisions and Tradeoffs
-
-* **chroot vs pivot_root**
-  Chroot was chosen for simplicity, though pivot_root provides stronger isolation.
-
-* **CLI vs Supervisor IPC**
-  CLI-based control simplifies implementation but can be extended to IPC-based communication.
-
-* **User-space logging vs threaded buffer**
-  Simpler implementation chosen; can be extended to bounded-buffer design.
-
----
-
-## 9. Scheduler Experiment Results
-
-Two CPU-bound processes were run:
-
-* One with default priority (nice = 0)
-* One with lower priority (nice = 10)
-
-Observation:
-
-* Both processes competed for CPU
-* Priority influenced scheduling behavior
-
----
-
-## 10. Conclusion
-
-This project demonstrates key operating system concepts including:
-
-* Process management
-* Filesystem isolation
-* Memory monitoring
-* Scheduling behavior
-
-The implementation provides a functional container runtime with scope for further enhancements such as full supervisor-based control and namespace isolation.
-
----
+Together these components illustrate process lifecycle management, inter-process communication, memory control, and CPU scheduling in a concrete, runnable system.
