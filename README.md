@@ -164,27 +164,31 @@ The Linux scheduler distributes load across available cores and adjusts dynamica
 ## Demo with Screenshots
 ### 1. Multi-container Supervision
 Shows two containers running under a single supervisor process.
-
+![3.1](screenshots/image_1.png)
 ### 2. Metadata Tracking
 Displays container metadata using engine ps.
-
+![3.2](screenshots/image_2.png)
 ### 3. Bounded-buffer Logging
 Shows logs captured through producer-consumer pipeline.
-
+![3.3.1](screenshots/image_3_1.png)
+![3.3.2](screenshots/image_3_2.png)
 ### 4. CLI and IPC
 Demonstrates CLI communicating with supervisor via UNIX socket.
-
+![3.4](screenshots/image_4.png)
 ### 5. Soft-limit Warning
 Kernel logs showing memory soft limit exceeded.
-
+![3.5](screenshots/image_5.png)
 ### 6. Hard-limit Enforcement
 Kernel kills container when hard limit is exceeded.
-
+![3.6.1](screenshots/image_6_1.png)
+![3.6.2](screenshots/image_6_2.png)
 ### 7. Scheduling Experiment
 Comparison of containers with different nice values.
-
+![3.7.1](screenshots/image_7_1.png)
+![3.7.2](screenshots/image_7_2.png)
 ### 8. Clean Teardown
 Shows no zombie processes after shutdown.
+![3.8](screenshots/image_8.png)
 
 ---
 
